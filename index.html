@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>ドラゴン退治</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; font-family: 'Georgia', serif; }
+  #gameCanvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
+
+  #hud {
+    position: fixed; top: 0; left: 0; width: 100%; pointer-events: none;
+    padding: 12px 16px; display: flex; justify-content: space-between; align-items: flex-start; z-index: 10;
+  }
+  .stat-panel {
+    background: rgba(0,0,0,0.65); border: 1px solid rgba(255,200,80,0.4);
+    border-radius: 8px; padding: 8px 12px; min-width: 160px;
+  }
+  .stat-label { color: #ffd080; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 4px; }
+  .bar-bg { background: rgba(255,255,255,0.15); border-radius: 4px; height: 10px; overflow: hidden; margin-bottom: 6px; }
+  .bar-fill { height: 100%; border-radius: 4px; transition: width 0.2s; }
+  .hp-fill { background: linear-gradient(90deg, #e74c3c, #ff6b6b); }
+  .sta-fill { background: linear-gradient(90deg, #27ae60, #2ecc71); }
+  .item-row { color: #fff; font-size: 12px; margin-top: 3px; }
+  .item-row span { color: #ffd080; }
+
+  #dragon-hud {
+    position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+    width: 90%; max-width: 400px; z-index: 10; pointer-events: none;
+  }
+  .dragon-info {
+    background: rgba(0,0,0,0.7); border: 1px solid rgba(255,80,80,0.5);
+    border-radius: 8px; padding: 8px 12px; margin-bottom: 5px; display: none;
+  }
+  .dragon-info.active { display: block; }
+  .dragon-name { color: #ff8080; font-size: 11px; letter-spacing: 1px; margin-bottom: 4px; }
+  .dragon-hp-fill { background: linear-gradient(90deg, #8e0000, #e74c3c); }
+
+  #message {
+    position: fixed; top: 45%; left: 50%; transform: translate(-50%,-50%);
+    color: #ffd080; font-size: 22px; font-weight: bold;
+    text-shadow: 0 0 20px rgba(255,200,0,0.8), 2px 2px 4px #000;
+    pointer-events: none; z-index: 20; text-align: center;
+    opacity: 0; transition: opacity 0.3s; letter-spacing: 2px;
+  }
+  #attack-label {
+    position: fixed; top: 35%; left: 50%; transform: translateX(-50%);
+    color: #fff; font-size: 17px; font-weight: bold; text-shadow: 0 0 10px #ff4400;
+    pointer-events: none; z-index: 15; opacity: 0; transition: opacity 0.2s; letter-spacing: 2px;
+  }
+  #controls-hint {
+    position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
+    color: rgba(255,255,255,0.55); font-size: 10px; text-align: center;
+    pointer-events: none; z-index: 10; line-height: 1.8;
+    background: rgba(0,0,0,0.5); padding: 5px 14px; border-radius: 20px;
+  }
+
+  #start-screen {
+    position: fixed; inset: 0;
+    background: radial-gradient(ellipse at center, #1a0500 0%, #000 100%);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 100; color: #fff;
+  }
+  #start-screen h1 {
+    font-size: clamp(36px,8vw,72px); color: #ff8c00;
+    text-shadow: 0 0 40px rgba(255,100,0,0.8), 0 0 80px rgba(255,50,0,0.4);
+    letter-spacing: 4px; margin-bottom: 16px; animation: pulse 2s infinite;
+  }
+  #start-screen .sub { color: #ffd080; font-size: 13px; margin-bottom: 6px; line-height: 2; text-align: center; padding: 0 20px; }
+  #start-btn {
+    margin-top: 28px; padding: 16px 52px;
+    background: linear-gradient(135deg, #a93226, #e74c3c);
+    color: #fff; border: none; border-radius: 8px; font-size: 20px; letter-spacing: 3px;
+    cursor: pointer; box-shadow: 0 0 30px rgba(231,76,60,0.6);
+    animation: glow 1.5s infinite alternate; font-family: 'Georgia', serif;
+  }
+  @keyframes pulse { 0%,100%{text-shadow:0 0 40px rgba(255,100,0,0.8)} 50%{text-shadow:0 0 80px rgba(255,150,0,1),0 0 120px rgba(255,50,0,0.6)} }
+  @keyframes glow { from{box-shadow:0 0 20px rgba(231,76,60,0.5)} to{box-shadow:0 0 50px rgba(231,76,60,0.95)} }
+
+  #result-screen {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.88);
+    display: none; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 100; color: #fff;
+  }
+  #result-screen.show { display: flex; }
+  #result-title { font-size: clamp(30px,7vw,58px); margin-bottom: 18px; letter-spacing: 4px; }
+  #result-sub { color: #aaa; font-size: 14px; margin-bottom: 12px; }
+  #retry-btn {
+    margin-top: 18px; padding: 14px 42px;
+    background: rgba(255,200,80,0.15); color: #ffd080;
+    border: 1px solid #ffd080; border-radius: 8px;
+    font-size: 18px; cursor: pointer; letter-spacing: 2px; font-family: 'Georgia', serif;
+  }
+  #dmg-flash {
+    position: fixed; inset: 0; background: rgba(255,0,0,0);
+    pointer-events: none; z-index: 50; transition: background 0.1s;
+  }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<div id="dmg-flash"></div>
+
+<div id="start-screen">
+  <h1>🐉 ドラゴン退治</h1>
+  <div class="sub">
+    タップ → 移動<br>
+    ドラゴンをタップ → 攻撃（距離で剣/魔法 自動選択）<br>
+    フリック → 無敵ダッシュ（スタミナ消費）<br>
+    ダブルタップ → 回復薬使用<br>
+    全3体のドラゴンを討伐せよ！
+  </div>
+  <button id="start-btn" onclick="startGame()">出 陣 ！</button>
+</div>
+
+<div id="hud">
+  <div class="stat-panel">
+    <div class="stat-label">⚔ 勇者</div>
+    <div class="bar-bg"><div class="bar-fill hp-fill" id="hero-hp-bar" style="width:100%"></div></div>
+    <div class="stat-label">スタミナ</div>
+    <div class="bar-bg"><div class="bar-fill sta-fill" id="hero-sta-bar" style="width:100%"></div></div>
+    <div class="item-row">🧪 回復薬 <span id="potion-count">3</span> 回</div>
+    <div class="item-row">🍖 龍肉 <span id="meat-count">0</span> 個</div>
+  </div>
+  <div class="stat-panel" style="min-width:110px;text-align:right">
+    <div class="stat-label">討伐数</div>
+    <div style="color:#ffd080;font-size:26px;font-weight:bold" id="kill-count">0 / 3</div>
+  </div>
+</div>
+
+<div id="dragon-hud">
+  <div class="dragon-info" id="d-info-0"><div class="dragon-name">🔥 ドラゴン α</div><div class="bar-bg"><div class="bar-fill dragon-hp-fill" id="d-hp-0" style="width:100%"></div></div></div>
+  <div class="dragon-info" id="d-info-1"><div class="dragon-name">🔥 ドラゴン β</div><div class="bar-bg"><div class="bar-fill dragon-hp-fill" id="d-hp-1" style="width:100%"></div></div></div>
+  <div class="dragon-info" id="d-info-2"><div class="dragon-name">🔥 ドラゴン γ</div><div class="bar-bg"><div class="bar-fill dragon-hp-fill" id="d-hp-2" style="width:100%"></div></div></div>
+</div>
+
+<div id="message"></div>
+<div id="attack-label"></div>
+<div id="controls-hint">タップ:移動 ／ ドラゴンタップ:攻撃 ／ フリック:無敵ダッシュ ／ ダブルタップ:回復薬</div>
+
+<div id="result-screen">
+  <div id="result-title"></div>
+  <div id="result-sub"></div>
+  <button id="retry-btn" onclick="location.reload()">もう一度プレイ</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ============ CONFIG ============
+const CFG = {
+  MAP: 100,
+  HERO_HP: 300, HERO_STA: 100,
+  DRAGON_HP: 500,
+  HERO_SPD: 0.13, DASH_SPD: 0.38,
+  STA_REGEN: 0.12, STA_DASH: 30,
+  SWORD_DMG: 28, SWORD_RANGE: 8,
+  MAGIC_DMG: 20, MAGIC_RANGE: 24,
+  D_AGGRO: 32,
+  D_DMG_TAIL: 38, D_DMG_BITE: 50, D_DMG_CHARGE: 42, D_DMG_BREATH: 7,
+};
+
+// ============ GLOBALS ============
+let scene, camera, renderer, clock;
+let hero, dragons=[], projectiles=[], particles=[], fireParticles=[];
+let heroHP, heroSta, potions, meats, kills;
+let heroInvincible=false, heroInvTimer=0, heroDashing=false;
+let heroAtkCD=0, heroTarget=null;
+let touchStart=null, touchTime=0, lastTap=0;
+let gameRunning=false, animID;
+
+// ============ INIT ============
+function initThree() {
+  scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0x88bbee, 70, 200);
+  scene.background = new THREE.Color(0x88bbee);
+
+  camera = new THREE.PerspectiveCamera(58, innerWidth/innerHeight, 0.1, 500);
+  camera.position.set(0,20,25);
+
+  renderer = new THREE.WebGLRenderer({canvas: document.getElementById('gameCanvas'), antialias:true});
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+
+  clock = new THREE.Clock();
+
+  // Lights
+  scene.add(new THREE.AmbientLight(0xffeedd, 0.7));
+  const sun = new THREE.DirectionalLight(0xfff5cc, 1.3);
+  sun.position.set(60,100,40);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048,2048);
+  sun.shadow.camera.left=-120; sun.shadow.camera.right=120;
+  sun.shadow.camera.top=120; sun.shadow.camera.bottom=-120;
+  sun.shadow.camera.far=300;
+  scene.add(sun);
+
+  // Ground
+  const gnd = new THREE.Mesh(
+    new THREE.PlaneGeometry(CFG.MAP*2, CFG.MAP*2, 30, 30),
+    new THREE.MeshLambertMaterial({color:0x5a7a3a})
+  );
+  gnd.rotation.x = -Math.PI/2; gnd.receiveShadow=true;
+  scene.add(gnd);
+
+  // Sea
+  const sea = new THREE.Mesh(
+    new THREE.PlaneGeometry(1200,1200),
+    new THREE.MeshLambertMaterial({color:0x1a5276})
+  );
+  sea.rotation.x=-Math.PI/2; sea.position.y=-0.6;
+  scene.add(sea);
+
+  // Environment deco
+  addDeco();
+
+  window.addEventListener('resize', ()=>{
+    camera.aspect=innerWidth/innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth,innerHeight);
+  });
+}
+
+function addDeco() {
+  // Rocks
+  for(let i=0;i<25;i++){
+    const r=Math.random()*2+0.5;
+    const rock=new THREE.Mesh(new THREE.DodecahedronGeometry(r),new THREE.MeshLambertMaterial({color:0x7f8c8d}));
+    let x,z;
+    do{ x=(Math.random()-0.5)*CFG.MAP*1.9; z=(Math.random()-0.5)*CFG.MAP*1.9; }
+    while(Math.sqrt(x*x+z*z)<12);
+    rock.position.set(x,r*0.4,z); rock.castShadow=true; scene.add(rock);
+  }
+  // Trees
+  for(let i=0;i<35;i++){
+    const g=new THREE.Group();
+    const t=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.32,2.8),new THREE.MeshLambertMaterial({color:0x6d4c41}));
+    t.position.y=1.4; g.add(t);
+    const l=new THREE.Mesh(new THREE.ConeGeometry(1.6,3.2,7),new THREE.MeshLambertMaterial({color:0x2e7d32}));
+    l.position.y=4; g.add(l);
+    let x,z;
+    do{ x=(Math.random()-0.5)*CFG.MAP*1.9; z=(Math.random()-0.5)*CFG.MAP*1.9; }
+    while(Math.sqrt(x*x+z*z)<14);
+    g.position.set(x,0,z); scene.add(g);
+  }
+}
+
+// ============ HERO ============
+function createHero() {
+  const g=new THREE.Group();
+
+  const bodyM=new THREE.MeshLambertMaterial({color:0x2471a3});
+  const skinM=new THREE.MeshLambertMaterial({color:0xf0b87a});
+  const armorM=new THREE.MeshLambertMaterial({color:0x909090});
+
+  // body
+  const body=new THREE.Mesh(new THREE.BoxGeometry(0.8,1.2,0.5),bodyM);
+  body.position.y=1.8; body.castShadow=true; g.add(body);
+  // head
+  const head=new THREE.Mesh(new THREE.BoxGeometry(0.62,0.62,0.62),skinM);
+  head.position.y=2.72; g.add(head);
+  // helmet
+  const helm=new THREE.Mesh(new THREE.CylinderGeometry(0.36,0.36,0.32,8),armorM);
+  helm.position.y=3.02; g.add(helm);
+  // legs
+  const legL=new THREE.Mesh(new THREE.BoxGeometry(0.3,0.88,0.3),new THREE.MeshLambertMaterial({color:0x2c3e50}));
+  legL.position.set(-0.22,0.74,0); legL.castShadow=true; g.add(legL);
+  const legR=legL.clone(); legR.position.x=0.22; g.add(legR);
+  // left arm
+  const armL=new THREE.Mesh(new THREE.BoxGeometry(0.24,0.88,0.24),bodyM);
+  armL.position.set(-0.54,1.8,0); g.add(armL);
+  // right arm + sword
+  const armRG=new THREE.Group();
+  armRG.position.set(0.54,1.88,0);
+  const armR=new THREE.Mesh(new THREE.BoxGeometry(0.24,0.88,0.24),bodyM);
+  armR.position.y=-0.2; armRG.add(armR);
+  // sword
+  const sw=new THREE.Group();
+  const blade=new THREE.Mesh(new THREE.BoxGeometry(0.07,1.7,0.05),new THREE.MeshLambertMaterial({color:0xd8d8d8}));
+  blade.position.y=-0.95; sw.add(blade);
+  const hilt=new THREE.Mesh(new THREE.BoxGeometry(0.32,0.08,0.07),new THREE.MeshLambertMaterial({color:0xc8a000}));
+  hilt.position.y=-0.06; sw.add(hilt);
+  armRG.add(sw);
+  g.add(armRG);
+
+  g.userData={armRG, sw, legL, legR, walkCycle:0, atkTimer:0, atkType:0, lastSword:'h', dashDir:null, dashFrames:0, moveTarget:null};
+  scene.add(g);
+  return g;
+}
+
+// ============ DRAGON ============
+function createDragon(pos, idx) {
+  const cols=[0xc0392b, 0x8e44ad, 0x1a8a6a];
+  const c=cols[idx];
+  const mat=new THREE.MeshLambertMaterial({color:c});
+  const g=new THREE.Group();
+
+  // body
+  const bGeo=new THREE.SphereGeometry(1.9,10,8);
+  bGeo.scale(1,0.72,1.3);
+  const body=new THREE.Mesh(bGeo,mat);
+  body.position.y=2.3; body.castShadow=true; g.add(body);
+
+  // neck group
+  const neckG=new THREE.Group();
+  neckG.position.set(0,3.1,1.6);
+  const neck=new THREE.Mesh(new THREE.CylinderGeometry(0.48,0.68,1.9,8),mat);
+  neck.rotation.x=-0.4; neckG.add(neck);
+
+  // head group
+  const headG=new THREE.Group();
+  headG.position.set(0,1.05,0.65);
+  const hd=new THREE.Mesh(new THREE.BoxGeometry(1.15,0.88,1.55),mat); headG.add(hd);
+  const jaw=new THREE.Mesh(new THREE.BoxGeometry(0.98,0.28,1.18),new THREE.MeshLambertMaterial({color:0xff7060}));
+  jaw.position.set(0,-0.36,0.1); headG.add(jaw);
+  [-0.36,0.36].forEach(x=>{
+    const eye=new THREE.Mesh(new THREE.SphereGeometry(0.11),new THREE.MeshLambertMaterial({color:0xffff00}));
+    eye.position.set(x,0.22,0.72); headG.add(eye);
+  });
+  [-0.28,0.28].forEach(x=>{
+    const horn=new THREE.Mesh(new THREE.ConeGeometry(0.11,0.72,6),new THREE.MeshLambertMaterial({color:0x333}));
+    horn.position.set(x,0.58,-0.28); horn.rotation.x=0.3; headG.add(horn);
+  });
+  neckG.add(headG);
+  g.add(neckG);
+
+  // tail chain
+  const tailG=new THREE.Group();
+  tailG.position.set(0,1.9,-1.6);
+  g.add(tailG);
+  let prev=tailG;
+  for(let i=0;i<6;i++){
+    const sr=0.55-i*0.07;
+    const seg=new THREE.Mesh(new THREE.CylinderGeometry(sr*0.68,sr,1.35,7),mat);
+    seg.position.set(0,0,-(1.35+i*0.08)); seg.rotation.x=0.15; seg.castShadow=true;
+    prev.add(seg); prev=seg;
+  }
+  const tip=new THREE.Mesh(new THREE.ConeGeometry(0.18,0.8,6),new THREE.MeshLambertMaterial({color:0x333}));
+  tip.rotation.x=Math.PI/2; tip.position.z=-1.1; prev.add(tip);
+
+  // wings
+  [-1,1].forEach(s=>{
+    const wG=new THREE.Group(); wG.position.set(s*1.6,2.9,0);
+    const geo=new THREE.BufferGeometry();
+    const verts=new Float32Array(s>0?[0,0,0,3.8,1.8,-0.5,3.2,0,-2.2,1,-1.2,-1.8]:[0,0,0,-3.8,1.8,-0.5,-3.2,0,-2.2,-1,-1.2,-1.8]);
+    geo.setAttribute('position',new THREE.BufferAttribute(verts,3));
+    geo.setIndex([0,1,2,0,2,3,0,1,3,1,2,3]); geo.computeVertexNormals();
+    const wm=new THREE.MeshLambertMaterial({color:c,transparent:true,opacity:0.72,side:THREE.DoubleSide});
+    wG.add(new THREE.Mesh(geo,wm)); g.add(wG);
+  });
+
+  // legs
+  [[-0.95,-0.85],[0.95,-0.85],[-0.72,0.75],[0.72,0.75]].forEach(([x,z])=>{
+    const leg=new THREE.Mesh(new THREE.CylinderGeometry(0.28,0.22,1.25,6),mat);
+    leg.position.set(x,0.82,z); leg.castShadow=true; g.add(leg);
+  });
+
+  g.position.copy(pos); g.position.y=0;
+
+  // 寝ている初期姿勢：胴体を倒して首・頭を地面に伏せる
+  g.rotation.z = 0.55;           // 胴体を横に傾ける
+  neckG.rotation.x = 1.1;        // 首を下に向ける
+  neckG.position.y = 1.8;
+  headG.position.y = 0.5;
+  headG.rotation.x = 0.7;        // 頭も下向き
+
+  g.userData={
+    hp:CFG.DRAGON_HP, maxHp:CFG.DRAGON_HP,
+    state:'sleeping', dead:false, idx,
+    neckG, headG, jaw, tailG,
+    atkTimer:80+Math.random()*40, atkPhase:'ready', curAtk:null,
+    breathActive:false, walkCycle:0,
+    sleepCycle:0, waking:false, wakeTimer:0,
+  };
+  scene.add(g);
+  return g;
+}
+
+// ============ GAME START ============
+function startGame() {
+  document.getElementById('start-screen').style.display='none';
+  initThree();
+  heroHP=CFG.HERO_HP; heroSta=CFG.HERO_STA;
+  potions=3; meats=0; kills=0;
+  heroInvincible=false; heroInvTimer=0; heroDashing=false;
+  heroAtkCD=0; heroTarget=null;
+  hero=createHero();
+  hero.position.set(0,0,0);
+  dragons=[];
+  [new THREE.Vector3(-42,0,-38), new THREE.Vector3(44,0,18), new THREE.Vector3(-8,0,46)].forEach((p,i)=>dragons.push(createDragon(p,i)));
+  setupInput();
+  gameRunning=true;
+  gameLoop();
+}
+
+// ============ INPUT ============
+function setupInput() {
+  const cv=document.getElementById('gameCanvas');
+  cv.addEventListener('touchstart', e=>{e.preventDefault(); const t=e.touches[0]; touchStart={x:t.clientX,y:t.clientY}; touchTime=Date.now();},{passive:false});
+  cv.addEventListener('touchend', e=>{e.preventDefault(); if(!touchStart)return; const t=e.changedTouches[0]; handlePointerUp(t.clientX,t.clientY);},{passive:false});
+  cv.addEventListener('mousedown', e=>{touchStart={x:e.clientX,y:e.clientY}; touchTime=Date.now();});
+  cv.addEventListener('mouseup', e=>handlePointerUp(e.clientX,e.clientY));
+}
+
+function handlePointerUp(cx,cy) {
+  if(!gameRunning||!touchStart){touchStart=null;return;}
+  const dx=cx-touchStart.x, dy=cy-touchStart.y;
+  const d=Math.sqrt(dx*dx+dy*dy), dur=Date.now()-touchTime;
+
+  // フリック → 無敵ダッシュ
+  if(d>45&&dur<280&&heroSta>=CFG.STA_DASH) {
+    const ang=Math.atan2(dy,dx);
+    hero.userData.dashDir=new THREE.Vector3(Math.cos(ang),0,Math.sin(ang)).normalize();
+    hero.userData.dashFrames=20;
+    heroDashing=true; heroInvincible=true; heroInvTimer=65;
+    heroSta-=CFG.STA_DASH;
+    showMsg('無敵ダッシュ！','#00ffff',700);
+    touchStart=null; return;
+  }
+
+  // ダブルタップ → 回復薬
+  const now=Date.now();
+  if(now-lastTap<320&&potions>0&&heroHP<CFG.HERO_HP){
+    potions--; heroHP=CFG.HERO_HP; updateHUD();
+    showMsg('回復薬！ HP全回復','#00ff88',1200);
+    lastTap=0; touchStart=null; return;
+  }
+  lastTap=now;
+
+  // Raycast
+  const rc=new THREE.Raycaster();
+  rc.setFromCamera(new THREE.Vector2((cx/innerWidth)*2-1,-(cy/innerHeight)*2+1), camera);
+
+  // ドラゴン判定
+  let hitD=null;
+  for(const d of dragons) {
+    if(d.userData.dead)continue;
+    const b=new THREE.Box3().setFromObject(d); b.expandByScalar(1.5);
+    if(rc.ray.intersectsBox(b)){hitD=d;break;}
+  }
+
+  if(hitD) {
+    heroTarget=hitD;
+    const dist=hero.position.distanceTo(hitD.position);
+    if(dist<=CFG.SWORD_RANGE&&heroAtkCD<=0) doHeroAtk('sword',hitD);
+    else if(dist<=CFG.MAGIC_RANGE&&heroAtkCD<=0) doHeroAtk('magic',hitD);
+    else hero.userData.moveTarget=hitD.position.clone();
+  } else {
+    const pl=new THREE.Plane(new THREE.Vector3(0,1,0),0);
+    const pt=new THREE.Vector3();
+    if(rc.ray.intersectPlane(pl,pt)) {
+      const hf=CFG.MAP*0.9;
+      pt.x=Math.max(-hf,Math.min(hf,pt.x));
+      pt.z=Math.max(-hf,Math.min(hf,pt.z));
+      hero.userData.moveTarget=pt;
+      heroTarget=null;
+    }
+  }
+  touchStart=null;
+}
+
+// ============ HERO ATTACK ============
+function doHeroAtk(type, dragon) {
+  if(heroAtkCD>0||dragon.userData.dead)return;
+  if(type==='sword') {
+    const vert=(hero.userData.lastSword!=='v');
+    hero.userData.lastSword=vert?'v':'h';
+    showAtkLabel(vert?'⚔ 縦回転斬り！':'⚔ 横回転斬り！');
+    hero.userData.atkTimer=vert?1:2;
+    dealDmg(dragon, CFG.SWORD_DMG+rnd(12));
+    heroAtkCD=42;
+    spawnHitParts(dragon.position.clone().add(new THREE.Vector3(0,2,0)), 0xffee00);
+  } else {
+    showAtkLabel('🔮 ファイヤー！');
+    spawnMagic(hero.position.clone(), dragon);
+    heroAtkCD=65;
+  }
+}
+
+function spawnMagic(from, dragon) {
+  const ball=new THREE.Mesh(new THREE.SphereGeometry(0.45,8,8),new THREE.MeshBasicMaterial({color:0xff4400}));
+  ball.position.copy(from); ball.position.y=2.2;
+  ball.add(new THREE.PointLight(0xff4400,2.5,6));
+  ball.userData={target:dragon, dmg:CFG.MAGIC_DMG+rnd(10)};
+  scene.add(ball); projectiles.push(ball);
+}
+
+// ============ DAMAGE ============
+function dealDmg(dragon, dmg) {
+  if(dragon.userData.dead)return;
+  dragon.userData.hp=Math.max(0, dragon.userData.hp-dmg);
+  updateHUD();
+  // flash white
+  const origC=dragon.children[0].material.color.getHex();
+  dragon.children[0].material.color.set(0xffffff);
+  setTimeout(()=>{if(!dragon.userData.dead)dragon.children[0].material.color.set(origC);},90);
+  if(dragon.userData.hp<=0) killDragon(dragon);
+  else wakeUpDragon(dragon);
+}
+
+function wakeUpDragon(dragon) {
+  const d=dragon.userData;
+  if(d.state==='combat'||d.dead) return;
+  if(d.state==='sleeping'||d.state==='idle'||d.state==='waking') {
+    d.state='waking';
+    d.wakeTimer=60;
+    showMsg('🐉 ドラゴンが目覚めた！','#ff8800',1500);
+  }
+}
+
+function hurtHero(dmg, msg) {
+  if(heroInvincible)return;
+  heroHP=Math.max(0, heroHP-dmg); updateHUD();
+  showMsg(msg,'#ff4444',900);
+  document.getElementById('dmg-flash').style.background='rgba(255,0,0,0.3)';
+  setTimeout(()=>document.getElementById('dmg-flash').style.background='rgba(255,0,0,0)',400);
+  heroInvincible=true; heroInvTimer=45;
+  if(heroHP<=0) endGame(false);
+}
+
+function killDragon(dragon) {
+  if(dragon.userData.dead)return;
+  dragon.userData.dead=true; dragon.userData.state='dead';
+  kills++; meats+=3; updateHUD();
+  showMsg('討伐！ 🎉','#ffd700',2200);
+  spawnHitParts(dragon.position.clone().add(new THREE.Vector3(0,2.5,0)),0xff8800,28);
+  let ft=0; const fi=setInterval(()=>{
+    ft++; dragon.rotation.z+=0.05; dragon.position.y-=0.07;
+    if(dragon.position.y<-4||ft>55){clearInterval(fi);scene.remove(dragon);}
+  },16);
+  if(kills>=3) setTimeout(()=>endGame(true),2000);
+}
+
+// ============ DRAGON AI ============
+function updateDragonAI(dragon, dt) {
+  if(dragon.userData.dead)return;
+  const d=dragon.userData;
+  const hp=hero.position, dp=dragon.position;
+  const dist=dp.distanceTo(hp);
+
+  // ===== 寝ている =====
+  if(d.state==='sleeping') {
+    d.sleepCycle=(d.sleepCycle||0)+dt*0.8;
+    // 寝息：胴体がゆっくり上下する
+    dragon.rotation.z = 0.55 + Math.sin(d.sleepCycle)*0.04;
+    // 首・頭は地面に伏せたまま
+    d.neckG.rotation.x = 1.1 + Math.sin(d.sleepCycle*0.7)*0.02;
+    return;
+  }
+
+  // ===== 起き上がり中 =====
+  if(d.state==='waking') {
+    d.wakeTimer--;
+    const prog = 1 - d.wakeTimer/60; // 0→1
+    // 胴体を起こす
+    dragon.rotation.z = 0.55 * (1-prog);
+    // 首・頭を戻す
+    d.neckG.rotation.x = 1.1 * (1-prog) - 0.4 * prog;
+    d.neckG.position.y = 1.8 * (1-prog) + 3.1 * prog;
+    d.headG.position.y = 0.5 * (1-prog) + 1.05 * prog;
+    d.headG.rotation.x = 0.7 * (1-prog);
+    if(d.wakeTimer<=0) {
+      // 完全に起き上がり→戦闘へ
+      dragon.rotation.z=0;
+      d.neckG.rotation.x=-0.4; d.neckG.position.set(0,3.1,1.6);
+      d.headG.position.set(0,1.05,0.65); d.headG.rotation.x=0;
+      d.state='combat'; d.atkTimer=60;
+    }
+    return;
+  }
+
+  // ===== 戦闘中 =====
+  // 常に勇者向き
+  if(dist>1) dragon.rotation.y=Math.atan2(hp.x-dp.x, hp.z-dp.z);
+
+  // 翼アニメ
+  d.walkCycle=(d.walkCycle||0)+dt*2;
+  const wings=[dragon.children[5],dragon.children[6]];
+  wings.forEach((w,i)=>{if(w)w.rotation.z=Math.sin(d.walkCycle+(i*Math.PI))*0.2;});
+
+  if(d.state!=='combat')return;
+
+  d.atkTimer-=1;
+
+  if(d.atkPhase==='ready'&&d.atkTimer<=0) {
+    if(dist>22) {
+      d.curAtk='breath'; d.atkTimer=100; d.atkPhase='exec'; d.breathActive=true;
+    } else {
+      const r=Math.random();
+      d.curAtk=r<0.35?'tail':r<0.65?'bite':'charge';
+      d.atkTimer=d.curAtk==='tail'?75:d.curAtk==='bite'?60:55;
+      d.atkPhase='exec';
+    }
+    return;
+  }
+
+  if(d.atkPhase==='exec') {
+    execDragonAtk(dragon, dist);
+    if(d.atkTimer<=0){d.atkPhase='ready'; d.atkTimer=85+rnd(50); d.curAtk=null; d.breathActive=false;}
+    return;
+  }
+
+  // 近づく
+  if(dist>CFG.SWORD_RANGE*0.9) {
+    const dir=new THREE.Vector3().subVectors(hp,dp).normalize();
+    dragon.position.addScaledVector(dir,0.065);
+  }
+}
+
+function execDragonAtk(dragon, dist) {
+  const d=dragon.userData;
+  const hp=hero.position, dp=dragon.position;
+  switch(d.curAtk) {
+    case 'tail':
+      dragon.rotation.y+=0.13;
+      if(dp.distanceTo(hp)<9.5) hurtHero(CFG.D_DMG_TAIL,'🐉 尻尾で吹き飛ばされた！');
+      break;
+    case 'bite': {
+      const prog=1-d.atkTimer/60;
+      d.neckG.position.z=1.6+Math.sin(prog*Math.PI)*2.8;
+      d.jaw.position.y=-0.36-Math.sin(prog*Math.PI)*0.32;
+      if(prog>0.38&&prog<0.68&&dist<12) hurtHero(CFG.D_DMG_BITE,'🐉 噛みつかれた！');
+      if(d.atkTimer<=2){d.neckG.position.z=1.6; d.jaw.position.y=-0.36;}
+      break;
+    }
+    case 'charge': {
+      const dir=new THREE.Vector3().subVectors(hp,dp).normalize();
+      dragon.position.addScaledVector(dir,0.24);
+      if(dist<6) {
+        hurtHero(CFG.D_DMG_CHARGE,'🐉 体当たりで吹き飛ばされた！');
+        const kb=dir.clone().multiplyScalar(9);
+        hero.position.add(kb); hero.position.y=0; clamp(hero);
+        d.atkTimer=Math.min(d.atkTimer,3);
+      }
+      break;
+    }
+    case 'breath':
+      if(d.breathActive) {
+        spawnBreath(dragon);
+        if(dist<26) hurtHero(CFG.D_DMG_BREATH*0.016*60,'🔥 炎のブレスを浴びた！');
+      }
+      break;
+  }
+}
+
+function spawnBreath(dragon) {
+  if(Math.random()>0.25)return;
+  for(let i=0;i<4;i++){
+    const p=new THREE.Mesh(new THREE.SphereGeometry(0.3+Math.random()*0.4,6,6),new THREE.MeshBasicMaterial({color:0xff3300,transparent:true,opacity:0.85}));
+    const ry=dragon.rotation.y;
+    p.position.copy(dragon.position); p.position.y+=2.8;
+    p.userData={vel:new THREE.Vector3(Math.sin(ry)*(0.25+Math.random()*0.18)+( Math.random()-0.5)*0.08,( Math.random()-0.5)*0.06,Math.cos(ry)*(0.25+Math.random()*0.18)+( Math.random()-0.5)*0.08),life:35+rnd(20),maxLife:55};
+    scene.add(p); fireParticles.push(p);
+  }
+}
+
+// ============ PARTICLES ============
+function spawnHitParts(pos,color,n=14) {
+  for(let i=0;i<n;i++){
+    const p=new THREE.Mesh(new THREE.SphereGeometry(0.14+Math.random()*0.2),new THREE.MeshBasicMaterial({color,transparent:true}));
+    p.position.copy(pos);
+    p.userData={vel:new THREE.Vector3((Math.random()-0.5)*0.35,Math.random()*0.42,(Math.random()-0.5)*0.35),life:32+rnd(18)};
+    scene.add(p); particles.push(p);
+  }
+}
+
+// ============ GAME LOOP ============
+function gameLoop() {
+  if(!gameRunning)return;
+  animID=requestAnimationFrame(gameLoop);
+  const dt=clock.getDelta();
+
+  updateHero(dt);
+  dragons.forEach(d=>{if(!d.userData.dead)updateDragonAI(d,dt);});
+  updateProjs();
+  updateParts();
+  updateFireParts();
+  checkColls();
+
+  // スタミナ回復
+  if(!heroDashing) heroSta=Math.min(CFG.HERO_STA, heroSta+CFG.STA_REGEN*dt*60);
+  if(heroInvTimer>0){heroInvTimer--; if(heroInvTimer<=0)heroInvincible=false;}
+  if(heroAtkCD>0)heroAtkCD--;
+
+  // カメラ追従
+  camera.position.lerp(hero.position.clone().add(new THREE.Vector3(0,20,26)),0.08);
+  camera.lookAt(hero.position.clone().add(new THREE.Vector3(0,1,0)));
+
+  updateHUD();
+  renderer.render(scene,camera);
+}
+
+function updateHero(dt) {
+  const ud=hero.userData;
+
+  // ダッシュ
+  if(heroDashing&&ud.dashFrames>0) {
+    hero.position.addScaledVector(ud.dashDir,CFG.DASH_SPD);
+    ud.dashFrames--;
+    if(ud.dashFrames<=0)heroDashing=false;
+    clamp(hero);
+    // 点滅
+    hero.visible=Math.floor(Date.now()/80)%2===0||!heroInvincible;
+    return;
+  }
+  hero.visible=true;
+
+  // 移動
+  if(ud.moveTarget) {
+    const d=hero.position.distanceTo(ud.moveTarget);
+    if(d<0.5){ud.moveTarget=null;}
+    else {
+      const dir=new THREE.Vector3().subVectors(ud.moveTarget,hero.position).normalize();
+      hero.position.addScaledVector(dir,CFG.HERO_SPD);
+      hero.rotation.y=Math.atan2(dir.x,dir.z);
+      ud.walkCycle=(ud.walkCycle||0)+0.18;
+      ud.legL.rotation.x=Math.sin(ud.walkCycle)*0.6;
+      ud.legR.rotation.x=Math.sin(ud.walkCycle+Math.PI)*0.6;
+      ud.armRG.rotation.x=Math.sin(ud.walkCycle+Math.PI)*0.3;
+    }
+    clamp(hero);
+  } else {
+    ud.legL.rotation.x*=0.85; ud.legR.rotation.x*=0.85;
+  }
+
+  // 攻撃アニメ（縦回転斬り）
+  if(ud.atkTimer===1) {
+    let rt=0; const id=setInterval(()=>{rt++; hero.rotation.y+=0.35; if(rt>18)clearInterval(id);},16);
+  }
+  // 横回転斬り
+  if(ud.atkTimer===2) {
+    let rt=0; const id=setInterval(()=>{rt++; hero.rotation.z=Math.sin(rt*0.4)*0.8; if(rt>18){clearInterval(id);hero.rotation.z=0;}},16);
+  }
+  ud.atkTimer=0;
+
+  // ターゲットへ自動攻撃
+  if(heroTarget&&!heroTarget.userData.dead&&heroAtkCD<=0) {
+    const dist=hero.position.distanceTo(heroTarget.position);
+    if(dist<=CFG.SWORD_RANGE) doHeroAtk('sword',heroTarget);
+    else if(dist<=CFG.MAGIC_RANGE) doHeroAtk('magic',heroTarget);
+  }
+}
+
+function updateProjs() {
+  for(let i=projectiles.length-1;i>=0;i--) {
+    const p=projectiles[i];
+    if(!p.userData.target||p.userData.target.userData.dead){scene.remove(p);projectiles.splice(i,1);continue;}
+    const tgt=p.userData.target;
+    const dir=new THREE.Vector3().subVectors(tgt.position.clone().add(new THREE.Vector3(0,2,0)),p.position);
+    const dist=dir.length(); dir.normalize();
+    p.position.addScaledVector(dir,0.52);
+    p.rotation.x+=0.25; p.rotation.y+=0.3;
+    if(dist<3){dealDmg(tgt,p.userData.dmg);spawnHitParts(p.position.clone(),0xff6600);scene.remove(p);projectiles.splice(i,1);}
+  }
+}
+
+function updateParts() {
+  for(let i=particles.length-1;i>=0;i--) {
+    const p=particles[i];
+    p.position.add(p.userData.vel); p.userData.vel.y-=0.016;
+    p.userData.life--; p.material.opacity=p.userData.life/50;
+    if(p.userData.life<=0){scene.remove(p);particles.splice(i,1);}
+  }
+}
+
+function updateFireParts() {
+  for(let i=fireParticles.length-1;i>=0;i--) {
+    const p=fireParticles[i];
+    p.position.add(p.userData.vel); p.userData.life--;
+    p.material.opacity=p.userData.life/p.userData.maxLife*0.85;
+    p.scale.setScalar(1+(1-p.userData.life/p.userData.maxLife)*2.2);
+    if(p.userData.life<=0){scene.remove(p);fireParticles.splice(i,1);}
+  }
+}
+
+function checkColls() {
+  dragons.forEach(d=>{
+    if(d.userData.dead)return;
+    if(hero.position.distanceTo(d.position)<4.5) {
+      const dir=new THREE.Vector3().subVectors(hero.position,d.position).normalize();
+      hero.position.addScaledVector(dir,0.32); hero.position.y=0; clamp(hero);
+      if(!heroInvincible) hurtHero(3,'🐉 押し飛ばされた！');
+    }
+  });
+}
+
+// ============ UTILS ============
+function clamp(obj) {
+  const h=CFG.MAP*0.9;
+  obj.position.x=Math.max(-h,Math.min(h,obj.position.x));
+  obj.position.z=Math.max(-h,Math.min(h,obj.position.z));
+  obj.position.y=0;
+}
+function rnd(n){return Math.floor(Math.random()*n);}
+
+// ============ HUD ============
+function updateHUD() {
+  document.getElementById('hero-hp-bar').style.width=(heroHP/CFG.HERO_HP*100)+'%';
+  document.getElementById('hero-sta-bar').style.width=(heroSta/CFG.HERO_STA*100)+'%';
+  document.getElementById('potion-count').textContent=potions;
+  document.getElementById('meat-count').textContent=meats;
+  document.getElementById('kill-count').textContent=kills+' / 3';
+  dragons.forEach((d,i)=>{
+    const info=document.getElementById('d-info-'+i);
+    const bar=document.getElementById('d-hp-'+i);
+    if(!d.userData.dead&&d.userData.state==='combat'){info.classList.add('active');bar.style.width=(d.userData.hp/d.userData.maxHp*100)+'%';}
+    else info.classList.remove('active');
+  });
+}
+
+let msgTimer=null;
+function showMsg(text,color,dur) {
+  const el=document.getElementById('message');
+  el.textContent=text; el.style.color=color||'#ffd080'; el.style.opacity='1';
+  if(msgTimer)clearTimeout(msgTimer);
+  msgTimer=setTimeout(()=>el.style.opacity='0',dur||1000);
+}
+let atkTimer=null;
+function showAtkLabel(text) {
+  const el=document.getElementById('attack-label');
+  el.textContent=text; el.style.opacity='1';
+  if(atkTimer)clearTimeout(atkTimer);
+  atkTimer=setTimeout(()=>el.style.opacity='0',900);
+}
+
+// ============ END ============
+function endGame(win) {
+  gameRunning=false; cancelAnimationFrame(animID);
+  const sc=document.getElementById('result-screen');
+  const ti=document.getElementById('result-title');
+  const su=document.getElementById('result-sub');
+  sc.classList.add('show');
+  if(win){ti.textContent='🏆 討伐完了！';ti.style.color='#ffd700';su.textContent='全ドラゴンを討伐した勇者よ、お疲れ様！ 龍肉 '+meats+' 個獲得';}
+  else{ti.textContent='💀 力尽きた...';ti.style.color='#e74c3c';su.textContent='討伐数: '+kills+' / 3 ── また挑め！';}
+}
+</script>
+</body>
+</html>

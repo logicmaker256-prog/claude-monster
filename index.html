@@ -49,6 +49,20 @@
     color: #fff; font-size: 17px; font-weight: bold; text-shadow: 0 0 10px #ff4400;
     pointer-events: none; z-index: 15; opacity: 0; transition: opacity 0.2s; letter-spacing: 2px;
   }
+  #heal-btn {
+    position: fixed; bottom: 90px; right: 16px;
+    width: 72px; height: 72px; border-radius: 50%;
+    background: linear-gradient(135deg, #1e8449, #27ae60);
+    border: 2px solid rgba(255,255,255,0.4);
+    color: #fff; font-size: 12px; font-weight: bold;
+    letter-spacing: 0.5px; line-height: 1.3; text-align: center;
+    cursor: pointer; z-index: 20;
+    box-shadow: 0 0 16px rgba(39,174,96,0.6);
+    pointer-events: auto; display: none;
+    flex-direction: column; align-items: center; justify-content: center;
+  }
+  #heal-btn.visible { display: flex; }
+  #heal-btn:active { transform: scale(0.93); }
   #controls-hint {
     position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
     color: rgba(255,255,255,0.55); font-size: 10px; text-align: center;
@@ -108,7 +122,6 @@
     タップ → 移動<br>
     ドラゴンをタップ → 攻撃（距離で剣/魔法 自動選択）<br>
     フリック → 無敵ダッシュ（スタミナ消費）<br>
-    ダブルタップ → 回復薬使用<br>
     全3体のドラゴンを討伐せよ！
   </div>
   <button id="start-btn" onclick="startGame()">出 陣 ！</button>
@@ -120,8 +133,7 @@
     <div class="bar-bg"><div class="bar-fill hp-fill" id="hero-hp-bar" style="width:100%"></div></div>
     <div class="stat-label">スタミナ</div>
     <div class="bar-bg"><div class="bar-fill sta-fill" id="hero-sta-bar" style="width:100%"></div></div>
-    <div class="item-row">🧪 回復薬 <span id="potion-count">3</span> 回</div>
-    <div class="item-row">🍖 龍肉 <span id="meat-count">0</span> 個</div>
+    <div class="item-row">🍖 龍肉 <span id="meat-count">3</span> 個</div>
   </div>
   <div class="stat-panel" style="min-width:110px;text-align:right">
     <div class="stat-label">討伐数</div>
@@ -135,9 +147,10 @@
   <div class="dragon-info" id="d-info-2"><div class="dragon-name">🔥 ドラゴン γ</div><div class="bar-bg"><div class="bar-fill dragon-hp-fill" id="d-hp-2" style="width:100%"></div></div></div>
 </div>
 
+<button id="heal-btn" onclick="useHeal()">🍖<br>回 復<br><span id="heal-count" style="font-size:10px;opacity:0.85">×3</span></button>
 <div id="message"></div>
 <div id="attack-label"></div>
-<div id="controls-hint">タップ:移動 ／ ドラゴンタップ:攻撃 ／ フリック:無敵ダッシュ ／ ダブルタップ:回復薬</div>
+<div id="controls-hint">タップ:移動 ／ ドラゴンタップ:攻撃 ／ フリック:無敵ダッシュ</div>
 
 <div id="result-screen">
   <div id="result-title"></div>
@@ -150,23 +163,28 @@
 // ============ CONFIG ============
 const CFG = {
   MAP: 100,
-  HERO_HP: 300, HERO_STA: 100,
-  DRAGON_HP: 500,
+  HERO_HP: 100, HERO_STA: 100,
+  DRAGON_HP: 200,
   HERO_SPD: 0.13, DASH_SPD: 0.38,
   STA_REGEN: 0.12, STA_DASH: 30,
-  SWORD_DMG: 28, SWORD_RANGE: 8,
-  MAGIC_DMG: 20, MAGIC_RANGE: 24,
+  SWORD_DMG: 25, SPIN_DMG: 25, SWORD_RANGE: 8,
+  MAGIC_DMG: 10, MAGIC_RANGE: 24,
   D_AGGRO: 32,
-  D_DMG_TAIL: 38, D_DMG_BITE: 50, D_DMG_CHARGE: 42, D_DMG_BREATH: 7,
+  D_DMG_TAIL: 50, D_DMG_BITE: 20, D_DMG_CHARGE: 20, D_DMG_BREATH: 20,
+  D_WALK_SPD: 0.065,
+  D_FLY_SPD: 0.195,
+  D_FLY_TRIGGER: 30,
+  D_LAND_DIST: 8,
+  D_MENACE_DIST: 16, // この距離以内で威嚇
 };
 
 // ============ GLOBALS ============
 let scene, camera, renderer, clock;
 let hero, dragons=[], projectiles=[], particles=[], fireParticles=[];
-let heroHP, heroSta, potions, meats, kills;
+let heroHP, heroSta, meats, kills;
 let heroInvincible=false, heroInvTimer=0, heroDashing=false;
 let heroAtkCD=0, heroTarget=null;
-let touchStart=null, touchTime=0, lastTap=0;
+let touchStart=null, touchTime=0;
 let gameRunning=false, animID;
 
 // ============ INIT ============
@@ -372,6 +390,8 @@ function createDragon(pos, idx) {
     atkTimer:80+Math.random()*40, atkPhase:'ready', curAtk:null,
     breathActive:false, walkCycle:0,
     sleepCycle:0, waking:false, wakeTimer:0,
+    flying:false, flyY:0, landTimer:0,
+    menacing:false, menaceCycle:0,
   };
   scene.add(g);
   return g;
@@ -382,7 +402,7 @@ function startGame() {
   document.getElementById('start-screen').style.display='none';
   initThree();
   heroHP=CFG.HERO_HP; heroSta=CFG.HERO_STA;
-  potions=3; meats=0; kills=0;
+  meats=3; kills=0;
   heroInvincible=false; heroInvTimer=0; heroDashing=false;
   heroAtkCD=0; heroTarget=null;
   hero=createHero();
@@ -418,15 +438,6 @@ function handlePointerUp(cx,cy) {
     showMsg('無敵ダッシュ！','#00ffff',700);
     touchStart=null; return;
   }
-
-  // ダブルタップ → 回復薬
-  const now=Date.now();
-  if(now-lastTap<320&&potions>0&&heroHP<CFG.HERO_HP){
-    potions--; heroHP=CFG.HERO_HP; updateHUD();
-    showMsg('回復薬！ HP全回復','#00ff88',1200);
-    lastTap=0; touchStart=null; return;
-  }
-  lastTap=now;
 
   // Raycast
   const rc=new THREE.Raycaster();
@@ -464,15 +475,17 @@ function handlePointerUp(cx,cy) {
 function doHeroAtk(type, dragon) {
   if(heroAtkCD>0||dragon.userData.dead)return;
   if(type==='sword') {
-    const vert=(hero.userData.lastSword!=='v');
-    hero.userData.lastSword=vert?'v':'h';
-    showAtkLabel(vert?'⚔ 縦回転斬り！':'⚔ 横回転斬り！');
-    hero.userData.atkTimer=vert?1:2;
-    dealDmg(dragon, CFG.SWORD_DMG+rnd(12));
-    heroAtkCD=42;
-    spawnHitParts(dragon.position.clone().add(new THREE.Vector3(0,2,0)), 0xffee00);
+    // 縦回転斬り(SPIN_DMG=25) と 横斬り(SWORD_DMG=25) を交互に
+    const isSpin=(hero.userData.lastSword!=='spin');
+    hero.userData.lastSword=isSpin?'spin':'normal';
+    const dmg = isSpin ? CFG.SPIN_DMG : CFG.SWORD_DMG;
+    showAtkLabel(isSpin?'⚔ 回転斬り！ '+dmg+'ダメージ':'⚔ 斬撃！ '+dmg+'ダメージ');
+    hero.userData.atkTimer=isSpin?1:2;
+    dealDmg(dragon, dmg);
+    heroAtkCD=isSpin?55:38;
+    spawnHitParts(dragon.position.clone().add(new THREE.Vector3(0,2,0)), isSpin?0xff8800:0xffee00);
   } else {
-    showAtkLabel('🔮 ファイヤー！');
+    showAtkLabel('🔮 ファイヤー！ '+CFG.MAGIC_DMG+'ダメージ');
     spawnMagic(hero.position.clone(), dragon);
     heroAtkCD=65;
   }
@@ -482,7 +495,7 @@ function spawnMagic(from, dragon) {
   const ball=new THREE.Mesh(new THREE.SphereGeometry(0.45,8,8),new THREE.MeshBasicMaterial({color:0xff4400}));
   ball.position.copy(from); ball.position.y=2.2;
   ball.add(new THREE.PointLight(0xff4400,2.5,6));
-  ball.userData={target:dragon, dmg:CFG.MAGIC_DMG+rnd(10)};
+  ball.userData={target:dragon, dmg:CFG.MAGIC_DMG};
   scene.add(ball); projectiles.push(ball);
 }
 
@@ -574,16 +587,105 @@ function updateDragonAI(dragon, dt) {
   // 常に勇者向き
   if(dist>1) dragon.rotation.y=Math.atan2(hp.x-dp.x, hp.z-dp.z);
 
-  // 翼アニメ
-  d.walkCycle=(d.walkCycle||0)+dt*2;
-  const wings=[dragon.children[5],dragon.children[6]];
-  wings.forEach((w,i)=>{if(w)w.rotation.z=Math.sin(d.walkCycle+(i*Math.PI))*0.2;});
-
   if(d.state!=='combat')return;
+
+  // ===== 飛行状態の管理 =====
+  if(!d.flying && dist > CFG.D_FLY_TRIGGER) {
+    // 距離が開いたら飛び立つ
+    d.flying = true;
+    d.flyY = 0;
+    showMsg('🐉 飛んでくる！','#ffaa00',1000);
+  }
+
+  if(d.flying) {
+    // 上昇フェーズ：高度12まで上がる
+    const targetH = 12;
+    d.flyY += (targetH - d.flyY) * 0.06;
+    dragon.position.y = d.flyY;
+
+    // 胴体を前傾きに
+    dragon.rotation.x = -0.35;
+
+    // 翼を大きく羽ばたく（速く・大きく）
+    d.walkCycle=(d.walkCycle||0)+dt*5;
+    const wings=[dragon.children[5],dragon.children[6]];
+    wings.forEach((w,i)=>{if(w)w.rotation.z=Math.sin(d.walkCycle+(i*Math.PI))*0.55;});
+
+    // 高空から一直線に勇者へ向かう
+    const dir=new THREE.Vector3().subVectors(hp,dp);
+    dir.y=0; dir.normalize();
+    dragon.position.addScaledVector(dir, CFG.D_FLY_SPD);
+
+    // 勇者の着陸距離に入ったら着陸開始
+    const groundDist=new THREE.Vector3(dp.x,0,dp.z).distanceTo(new THREE.Vector3(hp.x,0,hp.z));
+    if(groundDist <= CFG.D_LAND_DIST) {
+      d.flying = false;
+      d.landTimer = 30; // 着陸アニメフレーム数
+    }
+    return;
+  }
+
+  // ===== 着陸アニメ =====
+  if(d.landTimer > 0) {
+    d.landTimer--;
+    const prog = 1 - d.landTimer/30;
+    dragon.position.y = d.flyY * (1-prog); // 地面へ降りる
+    dragon.rotation.x = -0.35 * (1-prog);  // 胴体を水平に戻す
+    // 翼を落ち着かせる
+    d.walkCycle=(d.walkCycle||0)+dt*3;
+    const wings=[dragon.children[5],dragon.children[6]];
+    wings.forEach((w,i)=>{if(w)w.rotation.z=Math.sin(d.walkCycle+(i*Math.PI))*(0.55-0.35*prog);});
+    if(d.landTimer<=0){
+      dragon.position.y=0; dragon.rotation.x=0; d.flyY=0;
+      // 着陸衝撃：パーティクル
+      spawnHitParts(dragon.position.clone(),0xaaaaaa,10);
+    }
+    return;
+  }
+
+  // ===== 地上移動（歩き：勇者の半分速度） =====
+  d.walkCycle=(d.walkCycle||0)+dt*2;
+  d.menaceCycle=(d.menaceCycle||0)+dt;
+
+  const wings=[dragon.children[5],dragon.children[6]];
+  const isMenacing = (d.atkPhase==='ready' && dist <= CFG.D_MENACE_DIST);
+
+  if(isMenacing) {
+    // ===== 威嚇モード =====
+    if(!d.menacing) {
+      d.menacing=true;
+    }
+    // 翼を大きく広げてゆっくり上下（羽ばたきより遅く・大きく）
+    wings.forEach((w,i)=>{
+      if(w) w.rotation.z = Math.sin(d.menaceCycle*2.5+(i*Math.PI))*0.75
+               + (i===0?-0.4:0.4); // 常に広げ気味
+    });
+    // 口（下顎）をゆっくり開閉
+    d.jaw.position.y = -0.36 - Math.abs(Math.sin(d.menaceCycle*3.0))*0.38;
+    // 首を上げてのけぞる威嚇ポーズ
+    d.neckG.rotation.x = -0.4 - Math.abs(Math.sin(d.menaceCycle*1.5))*0.3;
+    // 胴体を少し揺らす
+    dragon.rotation.z = Math.sin(d.menaceCycle*2.5)*0.06;
+  } else {
+    // ===== 通常（翼ゆっくり・口閉じ） =====
+    if(d.menacing) {
+      // 威嚇解除：各パーツを戻す
+      d.menacing=false;
+      d.jaw.position.y=-0.36;
+      d.neckG.rotation.x=-0.4;
+      dragon.rotation.z=0;
+    }
+    wings.forEach((w,i)=>{if(w)w.rotation.z=Math.sin(d.walkCycle+(i*Math.PI))*0.2;});
+  }
 
   d.atkTimer-=1;
 
   if(d.atkPhase==='ready'&&d.atkTimer<=0) {
+    // 攻撃に入る前に威嚇パーツをリセット
+    d.jaw.position.y=-0.36;
+    d.neckG.rotation.x=-0.4;
+    dragon.rotation.z=0;
+    d.menacing=false;
     if(dist>22) {
       d.curAtk='breath'; d.atkTimer=100; d.atkPhase='exec'; d.breathActive=true;
     } else {
@@ -601,10 +703,10 @@ function updateDragonAI(dragon, dt) {
     return;
   }
 
-  // 近づく
+  // 地上で歩いて近づく（勇者の半分速度）
   if(dist>CFG.SWORD_RANGE*0.9) {
     const dir=new THREE.Vector3().subVectors(hp,dp).normalize();
-    dragon.position.addScaledVector(dir,0.065);
+    dragon.position.addScaledVector(dir, CFG.D_WALK_SPD);
   }
 }
 
@@ -798,9 +900,16 @@ function rnd(n){return Math.floor(Math.random()*n);}
 function updateHUD() {
   document.getElementById('hero-hp-bar').style.width=(heroHP/CFG.HERO_HP*100)+'%';
   document.getElementById('hero-sta-bar').style.width=(heroSta/CFG.HERO_STA*100)+'%';
-  document.getElementById('potion-count').textContent=potions;
   document.getElementById('meat-count').textContent=meats;
   document.getElementById('kill-count').textContent=kills+' / 3';
+  // 回復ボタン更新
+  const healBtn=document.getElementById('heal-btn');
+  const healCount=document.getElementById('heal-count');
+  if(gameRunning){
+    healBtn.classList.add('visible');
+    healCount.textContent='×'+meats;
+    healBtn.style.opacity=(meats>0&&heroHP<CFG.HERO_HP)?'1':'0.4';
+  } else { healBtn.classList.remove('visible'); }
   dragons.forEach((d,i)=>{
     const info=document.getElementById('d-info-'+i);
     const bar=document.getElementById('d-hp-'+i);
@@ -824,14 +933,27 @@ function showAtkLabel(text) {
   atkTimer=setTimeout(()=>el.style.opacity='0',900);
 }
 
+// ============ HEAL ============
+function useHeal() {
+  if(!gameRunning) return;
+  if(meats <= 0){ showMsg('龍肉がない！','#ff8888',900); return; }
+  if(heroHP >= CFG.HERO_HP){ showMsg('HPは満タンだ！','#aaffaa',900); return; }
+  meats--;
+  heroHP = CFG.HERO_HP;
+  updateHUD();
+  showMsg('🍖 龍肉を食べた！ HP全回復','#00ff88',1400);
+  spawnHitParts(hero.position.clone().add(new THREE.Vector3(0,2,0)), 0x00ff88, 10);
+}
+
 // ============ END ============
 function endGame(win) {
   gameRunning=false; cancelAnimationFrame(animID);
+  document.getElementById('heal-btn').classList.remove('visible');
   const sc=document.getElementById('result-screen');
   const ti=document.getElementById('result-title');
   const su=document.getElementById('result-sub');
   sc.classList.add('show');
-  if(win){ti.textContent='🏆 討伐完了！';ti.style.color='#ffd700';su.textContent='全ドラゴンを討伐した勇者よ、お疲れ様！ 龍肉 '+meats+' 個獲得';}
+  if(win){ti.textContent='🏆 討伐完了！';ti.style.color='#ffd700';su.textContent='全ドラゴンを討伐した勇者よ、お疲れ様！ 龍肉残り '+meats+' 個';}
   else{ti.textContent='💀 力尽きた...';ti.style.color='#e74c3c';su.textContent='討伐数: '+kills+' / 3 ── また挑め！';}
 }
 </script>

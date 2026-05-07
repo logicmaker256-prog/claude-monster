@@ -49,19 +49,45 @@
     color: #fff; font-size: 17px; font-weight: bold; text-shadow: 0 0 10px #ff4400;
     pointer-events: none; z-index: 15; opacity: 0; transition: opacity 0.2s; letter-spacing: 2px;
   }
+  /* ドラゴンレーダー */
+  /* 右下UI：レーダー＋回復ボタンを横並び・縦中央で統一 */
+  #bottom-right-ui {
+    position: fixed; bottom: 62px; right: 16px;
+    display: none; flex-direction: row;
+    align-items: center; gap: 12px;
+    z-index: 20;
+  }
+  #bottom-right-ui.visible { display: flex; }
+
+  #radar-wrap {
+    display: flex; flex-direction: column;
+    align-items: center; gap: 4px;
+    pointer-events: none;
+  }
+  #radar-canvas {
+    border-radius: 50%;
+    border: 2px solid rgba(255,200,80,0.6);
+    background: rgba(0,0,0,0.6);
+    display: block;
+  }
+  #radar-label {
+    color: rgba(255,200,80,0.8);
+    font-size: 10px; letter-spacing: 1px;
+  }
+
   #heal-btn {
-    position: fixed; bottom: 90px; right: 16px;
     width: 72px; height: 72px; border-radius: 50%;
     background: linear-gradient(135deg, #1e8449, #27ae60);
     border: 2px solid rgba(255,255,255,0.4);
     color: #fff; font-size: 12px; font-weight: bold;
     letter-spacing: 0.5px; line-height: 1.3; text-align: center;
-    cursor: pointer; z-index: 20;
+    cursor: pointer;
     box-shadow: 0 0 16px rgba(39,174,96,0.6);
-    pointer-events: auto; display: none;
-    flex-direction: column; align-items: center; justify-content: center;
+    pointer-events: auto;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    flex-shrink: 0;
   }
-  #heal-btn.visible { display: flex; }
   #heal-btn:active { transform: scale(0.93); }
   #controls-hint {
     position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
@@ -147,7 +173,13 @@
   <div class="dragon-info" id="d-info-2"><div class="dragon-name">🔥 ドラゴン γ</div><div class="bar-bg"><div class="bar-fill dragon-hp-fill" id="d-hp-2" style="width:100%"></div></div></div>
 </div>
 
-<button id="heal-btn" onclick="useHeal()">🍖<br>回 復<br><span id="heal-count" style="font-size:10px;opacity:0.85">×3</span></button>
+<div id="bottom-right-ui">
+  <div id="radar-wrap">
+    <canvas id="radar-canvas" width="72" height="72"></canvas>
+    <div id="radar-label">レーダー</div>
+  </div>
+  <button id="heal-btn" onclick="useHeal()">🍖<br>回 復<br><span id="heal-count" style="font-size:10px;opacity:0.85">×3</span></button>
+</div>
 <div id="message"></div>
 <div id="attack-label"></div>
 <div id="controls-hint">タップ:移動 ／ ドラゴンタップ:攻撃 ／ フリック:無敵ダッシュ</div>
@@ -170,7 +202,7 @@ const CFG = {
   SWORD_DMG: 25, SPIN_DMG: 25, SWORD_RANGE: 8,
   MAGIC_DMG: 10, MAGIC_RANGE: 24,
   D_AGGRO: 32,
-  D_DMG_TAIL: 50, D_DMG_BITE: 20, D_DMG_CHARGE: 20, D_DMG_BREATH: 20,
+  D_DMG_TAIL: 30, D_DMG_BITE: 20, D_DMG_CHARGE: 20, D_DMG_BREATH: 20,
   D_WALK_SPD: 0.065,
   D_FLY_SPD: 0.195,
   D_FLY_TRIGGER: 30,
@@ -502,6 +534,10 @@ function spawnMagic(from, dragon) {
 // ============ DAMAGE ============
 function dealDmg(dragon, dmg) {
   if(dragon.userData.dead)return;
+  // 起き上がりモーション中は無敵（ダメージ無効）→即戦闘モードへ移行のみ
+  if(dragon.userData.state==='waking'){
+    wakeUpDragon(dragon); return;
+  }
   dragon.userData.hp=Math.max(0, dragon.userData.hp-dmg);
   updateHUD();
   // flash white
@@ -515,11 +551,11 @@ function dealDmg(dragon, dmg) {
 function wakeUpDragon(dragon) {
   const d=dragon.userData;
   if(d.state==='combat'||d.dead) return;
-  if(d.state==='sleeping'||d.state==='idle'||d.state==='waking') {
-    d.state='waking';
-    d.wakeTimer=60;
-    showMsg('🐉 ドラゴンが目覚めた！','#ff8800',1500);
-  }
+  // 1撃もらった瞬間にcombatフラグを立てる（起き上がり中も戦闘扱い）
+  d.state='waking';
+  d.wakeTimer=60;
+  d.combatReady=true; // 起き上がり完了後すぐ攻撃開始
+  showMsg('🐉 ドラゴンが目覚めた！','#ff8800',1500);
 }
 
 function hurtHero(dmg, msg) {
@@ -574,11 +610,12 @@ function updateDragonAI(dragon, dt) {
     d.headG.position.y = 0.5 * (1-prog) + 1.05 * prog;
     d.headG.rotation.x = 0.7 * (1-prog);
     if(d.wakeTimer<=0) {
-      // 完全に起き上がり→戦闘へ
+      // 完全に起き上がり→即戦闘へ（攻撃ディレイ短め）
       dragon.rotation.z=0;
       d.neckG.rotation.x=-0.4; d.neckG.position.set(0,3.1,1.6);
       d.headG.position.set(0,1.05,0.65); d.headG.rotation.x=0;
-      d.state='combat'; d.atkTimer=60;
+      d.state='combat'; d.atkTimer=20; // 起き上がり直後すぐ攻撃
+      d.combatReady=false;
     }
     return;
   }
@@ -785,11 +822,58 @@ function gameLoop() {
   if(heroInvTimer>0){heroInvTimer--; if(heroInvTimer<=0)heroInvincible=false;}
   if(heroAtkCD>0)heroAtkCD--;
 
-  // カメラ追従
-  camera.position.lerp(hero.position.clone().add(new THREE.Vector3(0,20,26)),0.08);
-  camera.lookAt(hero.position.clone().add(new THREE.Vector3(0,1,0)));
+  // カメラ追従：探索中は俯瞰、戦闘中は低く前に出て見上げアングル
+  const inCombat = dragons.some(d=>!d.userData.dead && d.userData.state==='combat');
+
+  // 戦闘中：ドラゴンの方向を求めてカメラをその逆側・低い位置に配置
+  let targetCamPos;
+  if(inCombat) {
+    // 最も近い戦闘中ドラゴンを取得
+    let nearDragon = null, nearDist = Infinity;
+    dragons.forEach(d=>{
+      if(!d.userData.dead && d.userData.state==='combat'){
+        const dd = hero.position.distanceTo(d.position);
+        if(dd < nearDist){ nearDist=dd; nearDragon=d; }
+      }
+    });
+    if(nearDragon) {
+      // 勇者→ドラゴンの方向ベクトル（水平）
+      const toD = new THREE.Vector3().subVectors(nearDragon.position, hero.position);
+      toD.y = 0; toD.normalize();
+      // カメラは勇者の背後（ドラゴンと逆方向）・地面すれすれ・少し後ろ
+      targetCamPos = hero.position.clone()
+        .addScaledVector(toD, -9)   // 背後9m
+        .add(new THREE.Vector3(0, 2.5, 0)); // 高さ2.5（目線の高さ）
+    } else {
+      targetCamPos = hero.position.clone().add(new THREE.Vector3(0,20,26));
+    }
+  } else {
+    // 探索中：俯瞰アングル
+    targetCamPos = hero.position.clone().add(new THREE.Vector3(0,20,26));
+  }
+
+  const lerpS = inCombat ? 0.05 : 0.06;
+  camera.position.lerp(targetCamPos, lerpS);
+
+  // 注視点：戦闘中はドラゴンの頭の高さを見上げる、探索中は勇者の頭
+  if(inCombat) {
+    let nearDragon2 = null, nearDist2 = Infinity;
+    dragons.forEach(d=>{
+      if(!d.userData.dead && d.userData.state==='combat'){
+        const dd = hero.position.distanceTo(d.position);
+        if(dd < nearDist2){ nearDist2=dd; nearDragon2=d; }
+      }
+    });
+    const lookTarget = nearDragon2
+      ? nearDragon2.position.clone().add(new THREE.Vector3(0, 4, 0))
+      : hero.position.clone().add(new THREE.Vector3(0,1,0));
+    camera.lookAt(lookTarget);
+  } else {
+    camera.lookAt(hero.position.clone().add(new THREE.Vector3(0,1,0)));
+  }
 
   updateHUD();
+  updateRadar();
   renderer.render(scene,camera);
 }
 
@@ -811,8 +895,11 @@ function updateHero(dt) {
   // 移動
   if(ud.moveTarget) {
     const d=hero.position.distanceTo(ud.moveTarget);
-    if(d<0.5){ud.moveTarget=null;}
-    else {
+    // ドラゴンに近すぎたら移動目標を自動キャンセル（引っかかり防止）
+    const nearDragon=dragons.some(dr=>!dr.userData.dead && hero.position.distanceTo(dr.position)<6);
+    if(d<0.5 || nearDragon){
+      ud.moveTarget=null;
+    } else {
       const dir=new THREE.Vector3().subVectors(ud.moveTarget,hero.position).normalize();
       hero.position.addScaledVector(dir,CFG.HERO_SPD);
       hero.rotation.y=Math.atan2(dir.x,dir.z);
@@ -879,10 +966,20 @@ function updateFireParts() {
 function checkColls() {
   dragons.forEach(d=>{
     if(d.userData.dead)return;
-    if(hero.position.distanceTo(d.position)<4.5) {
+    const dist=hero.position.distanceTo(d.position);
+    if(dist<5.5) {
+      // 強めに押し出す（引っかかり防止）
       const dir=new THREE.Vector3().subVectors(hero.position,d.position).normalize();
-      hero.position.addScaledVector(dir,0.32); hero.position.y=0; clamp(hero);
-      if(!heroInvincible) hurtHero(3,'🐉 押し飛ばされた！');
+      const push=Math.max(0.5, (5.5-dist)*0.4);
+      hero.position.addScaledVector(dir, push);
+      hero.position.y=0; clamp(hero);
+      // 移動目標・攻撃ターゲットをクリアして自動追従を止める
+      hero.userData.moveTarget=null;
+      heroTarget=null;
+      // waking中はダメージなし、combat中のみダメージ
+      if(!heroInvincible && d.userData.state==='combat') {
+        hurtHero(3,'🐉 押し飛ばされた！');
+      }
     }
   });
 }
@@ -897,19 +994,146 @@ function clamp(obj) {
 function rnd(n){return Math.floor(Math.random()*n);}
 
 // ============ HUD ============
+function updateRadar() {
+  const cv = document.getElementById('radar-canvas');
+  if(!cv || !gameRunning) return;
+
+  const ctx = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  const cx = W/2, cy = H/2, R = W/2 - 4;
+  ctx.clearRect(0,0,W,H);
+
+  // 背景円
+  ctx.beginPath(); ctx.arc(cx,cy,R,0,Math.PI*2);
+  ctx.fillStyle='rgba(0,0,0,0.65)'; ctx.fill();
+  ctx.strokeStyle='rgba(255,200,80,0.5)'; ctx.lineWidth=1.5; ctx.stroke();
+
+  // 十字線（薄く）
+  ctx.strokeStyle='rgba(255,255,255,0.12)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(cx,cy-R+2); ctx.lineTo(cx,cy+R-2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx-R+2,cy); ctx.lineTo(cx+R-2,cy); ctx.stroke();
+
+  // 勇者（中央・白丸）
+  ctx.beginPath(); ctx.arc(cx,cy,4,0,Math.PI*2);
+  ctx.fillStyle='#ffffff'; ctx.fill();
+  // 前方三角
+  ctx.beginPath(); ctx.moveTo(cx,cy-9); ctx.lineTo(cx-4,cy-4); ctx.lineTo(cx+4,cy-4);
+  ctx.closePath(); ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fill();
+
+  // カメラの水平向き角を取得（ユーザーが実際に見ている方向）
+  const camDir = new THREE.Vector3();
+  camera.getWorldDirection(camDir);
+  const camYaw = Math.atan2(camDir.x, camDir.z); // カメラ前方のyaw角
+
+  const SCALE   = (R-10) / 55; // レーダー半径55m分
+  const dColors = ['#ff4444','#b44aff','#1aff9c'];
+
+  let nearDist = Infinity, nearIdx = -1;
+
+  dragons.forEach((d,i)=>{
+    if(d.userData.dead) return;
+    const dx = d.position.x - hero.position.x;
+    const dz = d.position.z - hero.position.z;
+    const rawDist = Math.sqrt(dx*dx + dz*dz);
+    if(rawDist < nearDist){ nearDist=rawDist; nearIdx=i; }
+
+    // カメラ向き基準で回転（レーダー上=カメラ前方=ユーザー目線の奥）
+    const cos = Math.cos(-camYaw), sin = Math.sin(-camYaw);
+    const rx =  dx*cos - dz*sin;
+    const ry =  dx*sin + dz*cos;
+
+    // レーダー上の座標（上=カメラ前方）
+    let px = cx + rx * SCALE;
+    let py = cy - ry * SCALE;
+
+    const len = Math.sqrt((px-cx)**2+(py-cy)**2);
+    const inRange = len <= R-8;
+
+    if(inRange) {
+      // ===== 範囲内：位置に点を描画 =====
+      const pulse = d.userData.state==='combat'
+        ? 0.6 + Math.abs(Math.sin(Date.now()*0.006))*0.4 : 0.55;
+
+      // 戦闘中：大きめ点滅丸
+      if(d.userData.state==='combat'){
+        const pr=(Math.sin(Date.now()*0.007)+1)*3;
+        ctx.beginPath(); ctx.arc(px,py,9+pr,0,Math.PI*2);
+        ctx.strokeStyle=dColors[i]; ctx.lineWidth=1.5;
+        ctx.globalAlpha=0.35; ctx.stroke(); ctx.globalAlpha=1;
+      }
+      ctx.beginPath(); ctx.arc(px,py, d.userData.state==='combat'?7:5, 0,Math.PI*2);
+      ctx.fillStyle=dColors[i]; ctx.globalAlpha=pulse; ctx.fill(); ctx.globalAlpha=1;
+
+    } else {
+      // ===== 範囲外：円周上に太い矢印を描画 =====
+      const ang = Math.atan2(py-cy, px-cx);
+      const ax  = cx + Math.cos(ang)*(R-9);
+      const ay  = cy + Math.sin(ang)*(R-9);
+
+      const pulse = d.userData.state==='combat'
+        ? 0.7 + Math.abs(Math.sin(Date.now()*0.006))*0.3 : 0.6;
+
+      ctx.save();
+      ctx.translate(ax, ay);
+      ctx.rotate(ang + Math.PI/2); // 上向き矢印を方向に回転
+
+      // 矢印本体（太め）
+      ctx.globalAlpha = pulse;
+      ctx.fillStyle = dColors[i];
+      ctx.beginPath();
+      ctx.moveTo(0, -10);   // 先端
+      ctx.lineTo(-6,  2);
+      ctx.lineTo(-2,  0);
+      ctx.lineTo(-2,  8);
+      ctx.lineTo( 2,  8);
+      ctx.lineTo( 2,  0);
+      ctx.lineTo( 6,  2);
+      ctx.closePath();
+      ctx.fill();
+
+      // 戦闘中は縁取りで強調
+      if(d.userData.state==='combat'){
+        ctx.strokeStyle='#fff'; ctx.lineWidth=1; ctx.stroke();
+      }
+      ctx.globalAlpha=1;
+      ctx.restore();
+    }
+  });
+
+  // 最近接ドラゴンまでの距離
+  if(nearDist < Infinity){
+    const distText = Math.round(nearDist)+'m';
+    // フォントサイズをキャンバス幅に合わせて自動調整
+    const maxW = W * 0.82;
+    let fontSize = 26;
+    ctx.font = 'bold '+fontSize+'px monospace';
+    while(ctx.measureText(distText).width > maxW && fontSize > 10) {
+      fontSize--;
+      ctx.font = 'bold '+fontSize+'px monospace';
+    }
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    // 影で視認性UP
+    ctx.shadowColor='rgba(0,0,0,0.9)'; ctx.shadowBlur=6;
+    ctx.fillStyle='rgba(255,220,80,1)';
+    ctx.fillText(distText, cx, cy);
+    ctx.shadowBlur=0; ctx.textBaseline='alphabetic';
+  }
+}
+
 function updateHUD() {
   document.getElementById('hero-hp-bar').style.width=(heroHP/CFG.HERO_HP*100)+'%';
   document.getElementById('hero-sta-bar').style.width=(heroSta/CFG.HERO_STA*100)+'%';
   document.getElementById('meat-count').textContent=meats;
   document.getElementById('kill-count').textContent=kills+' / 3';
   // 回復ボタン更新
-  const healBtn=document.getElementById('heal-btn');
+  const ui=document.getElementById('bottom-right-ui');
   const healCount=document.getElementById('heal-count');
   if(gameRunning){
-    healBtn.classList.add('visible');
+    ui.classList.add('visible');
     healCount.textContent='×'+meats;
-    healBtn.style.opacity=(meats>0&&heroHP<CFG.HERO_HP)?'1':'0.4';
-  } else { healBtn.classList.remove('visible'); }
+    document.getElementById('heal-btn').style.opacity=(meats>0&&heroHP<CFG.HERO_HP)?'1':'0.4';
+  } else { ui.classList.remove('visible'); }
   dragons.forEach((d,i)=>{
     const info=document.getElementById('d-info-'+i);
     const bar=document.getElementById('d-hp-'+i);
@@ -948,7 +1172,7 @@ function useHeal() {
 // ============ END ============
 function endGame(win) {
   gameRunning=false; cancelAnimationFrame(animID);
-  document.getElementById('heal-btn').classList.remove('visible');
+  document.getElementById('bottom-right-ui').classList.remove('visible');
   const sc=document.getElementById('result-screen');
   const ti=document.getElementById('result-title');
   const su=document.getElementById('result-sub');
